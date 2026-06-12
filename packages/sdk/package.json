@@ -1,0 +1,24 @@
+{
+  "name": "@openmesh/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenMesh developer SDK",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src/",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openmesh/shared": "workspace:*"
+  }
+}

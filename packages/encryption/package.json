@@ -1,0 +1,13 @@
+{
+  "name": "@openmesh/encryption",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AES-256-GCM encryption utilities for OpenMesh",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  }
+}

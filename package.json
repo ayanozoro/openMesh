@@ -1,0 +1,39 @@
+{
+  "name": "openmesh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Privacy-first, peer-to-peer local file sharing platform",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0 <=22.x",
+    "pnpm": ">=9.0.0 <10.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "node scripts/check-node.mjs",
+    "prebuild": "node scripts/check-node.mjs",
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev --workspace=@openmesh/web",
+    "dev:server": "npm run dev --workspace=@openmesh/server",
+    "build": "node node_modules/turbo/bin/turbo run build",
+    "lint": "node node_modules/turbo/bin/turbo run lint",
+    "type-check": "node node_modules/turbo/bin/turbo run type-check",
+    "test": "node node_modules/turbo/bin/turbo run test",
+    "format": "node node_modules/prettier/bin/prettier.cjs --write \"**/*.{ts,tsx,js,mjs,json,md}\"",
+    "format:check": "node node_modules/prettier/bin/prettier.cjs --check \"**/*.{ts,tsx,js,mjs,json,md}\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-tailwindcss": "^0.6.9",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  }
+}
