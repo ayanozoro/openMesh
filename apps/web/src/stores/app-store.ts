@@ -2,8 +2,9 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppSettings, Device, Room, TransferItem } from "@openmesh/shared";
+import type { AppSettings, Device, Room, TransferItem, TextMessagePayload } from "@openmesh/shared";
 import { DEFAULT_SETTINGS, generateId, getDefaultDeviceName } from "@openmesh/shared";
+import type { Socket } from "socket.io-client";
 
 interface AppState {
   deviceId: string;
@@ -14,6 +15,8 @@ interface AppState {
   transfers: TransferItem[];
   isConnected: boolean;
   serverStatus: "connected" | "disconnected" | "connecting";
+  socket: Socket | null;
+  messages: Record<string, TextMessagePayload[]>;
 
   setSettings: (settings: Partial<AppSettings>) => void;
   setDevices: (devices: Device[]) => void;
@@ -26,6 +29,8 @@ interface AppState {
   removeTransfer: (id: string) => void;
   setConnected: (connected: boolean) => void;
   setServerStatus: (status: AppState["serverStatus"]) => void;
+  setSocket: (socket: Socket | null) => void;
+  addMessage: (roomId: string, message: TextMessagePayload) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -42,6 +47,8 @@ export const useAppStore = create<AppState>()(
       transfers: [],
       isConnected: false,
       serverStatus: "disconnected",
+      socket: null,
+      messages: {},
 
       setSettings: (updates) =>
         set((state) => ({
@@ -94,6 +101,23 @@ export const useAppStore = create<AppState>()(
       setConnected: (connected) => set({ isConnected: connected }),
 
       setServerStatus: (status) => set({ serverStatus: status }),
+
+      setSocket: (socket) => set({ socket }),
+
+      addMessage: (roomId, message) =>
+        set((state) => {
+          const roomMessages = state.messages[roomId] || [];
+          // Avoid duplicate messages if received multiple times
+          if (roomMessages.some((m) => m.timestamp === message.timestamp && m.senderId === message.senderId && m.content === message.content)) {
+            return {};
+          }
+          return {
+            messages: {
+              ...state.messages,
+              [roomId]: [...roomMessages, message],
+            },
+          };
+        }),
     }),
     {
       name: "openmesh-storage",

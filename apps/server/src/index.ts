@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { APP_VERSION, createApiResponse, PORTS } from "@openmesh/shared";
 import { createSocketServer } from "./socket/index.js";
 
+import { connectDB } from "./services/db.js";
+
 const app: Express = express();
 const httpServer = createServer(app);
 const startTime = Date.now();
@@ -14,6 +16,9 @@ app.use(
   }),
 );
 app.use(express.json());
+
+// Initialize MongoDB connection
+connectDB();
 
 createSocketServer(httpServer);
 

@@ -5,6 +5,8 @@ import { io, type Socket } from "socket.io-client";
 import { SOCKET_EVENTS, type Device, type Room } from "@openmesh/shared";
 import { useAppStore } from "@/stores/app-store";
 
+let activeSocket: Socket | null = null;
+
 export function useSocketConnection(): RefObject<Socket | null> {
   const socketRef = useRef<Socket | null>(null);
   const {
@@ -16,6 +18,8 @@ export function useSocketConnection(): RefObject<Socket | null> {
     updateRoom,
     setConnected,
     setServerStatus,
+    setSocket,
+    addMessage,
   } = useAppStore();
 
   useEffect(() => {
@@ -29,6 +33,10 @@ export function useSocketConnection(): RefObject<Socket | null> {
     });
 
     socketRef.current = socket;
+    activeSocket = socket;
+    setSocket(socket);
+
+    let heartbeatTimer: NodeJS.Timeout;
 
     socket.on("connect", () => {
       setServerStatus("connected");
@@ -63,11 +71,17 @@ export function useSocketConnection(): RefObject<Socket | null> {
           }
         },
       );
+
+      // Start heartbeat
+      heartbeatTimer = setInterval(() => {
+        socket.emit("device:heartbeat", { deviceId });
+      }, 15000);
     });
 
     socket.on("disconnect", () => {
       setServerStatus("disconnected");
       setConnected(false);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
     });
 
     socket.on(SOCKET_EVENTS.DEVICE_UPDATE, (device: Device) => {
@@ -78,9 +92,16 @@ export function useSocketConnection(): RefObject<Socket | null> {
       updateRoom(room);
     });
 
+    socket.on(SOCKET_EVENTS.TEXT_MESSAGE, (payload: any) => {
+      addMessage(payload.roomId, payload);
+    });
+
     return () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       socket.disconnect();
       socketRef.current = null;
+      activeSocket = null;
+      setSocket(null);
     };
   }, [
     deviceId,
@@ -92,11 +113,13 @@ export function useSocketConnection(): RefObject<Socket | null> {
     setServerStatus,
     updateDevice,
     updateRoom,
+    setSocket,
+    addMessage,
   ]);
 
   return socketRef;
 }
 
 export function getSocket(): Socket | null {
-  return null;
+  return activeSocket;
 }

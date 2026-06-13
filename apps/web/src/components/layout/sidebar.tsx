@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import {
   Home,
   Monitor,
+  FolderOpen,
   ArrowLeftRight,
   History,
   Settings,
@@ -19,10 +20,11 @@ import { useAppStore } from "@/stores/app-store";
 const navItems = [
   { href: "/", label: "Home", icon: Home, shortcut: "1" },
   { href: "/devices", label: "Devices", icon: Monitor, shortcut: "2" },
-  { href: "/transfer", label: "Transfer", icon: ArrowLeftRight, shortcut: "3" },
-  { href: "/history", label: "History", icon: History, shortcut: "4" },
-  { href: "/settings", label: "Settings", icon: Settings, shortcut: "5" },
-  { href: "/about", label: "About", icon: Info, shortcut: "6" },
+  { href: "/rooms", label: "Rooms", icon: FolderOpen, shortcut: "3" },
+  { href: "/transfer", label: "Transfer", icon: ArrowLeftRight, shortcut: "4" },
+  { href: "/history", label: "History", icon: History, shortcut: "5" },
+  { href: "/settings", label: "Settings", icon: Settings, shortcut: "6" },
+  { href: "/about", label: "About", icon: Info, shortcut: "7" },
 ];
 
 export function Sidebar() {

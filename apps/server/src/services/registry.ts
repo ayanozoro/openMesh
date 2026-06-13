@@ -1,12 +1,58 @@
 import type { Device, Room, RoomMember } from "@openmesh/shared";
 import { generateId } from "@openmesh/shared";
+import { isConnected } from "./db.js";
+import { DeviceModel, RoomModel } from "./schemas.js";
 
 interface ConnectedDevice extends Device {
   socketId: string;
 }
 
+function saveDeviceToDB(device: Device) {
+  if (!isConnected()) return;
+  DeviceModel.updateOne(
+    { id: device.id },
+    { $set: device },
+    { upsert: true }
+  ).catch((err) => {
+    console.error("[db] Error saving device to DB:", err);
+  });
+}
+
+function saveRoomToDB(room: Room) {
+  if (!isConnected()) return;
+  RoomModel.updateOne(
+    { id: room.id },
+    { $set: room },
+    { upsert: true }
+  ).catch((err) => {
+    console.error("[db] Error saving room to DB:", err);
+  });
+}
+
 export class DeviceRegistry {
   private devices = new Map<string, ConnectedDevice>();
+
+  async loadFromDB(): Promise<void> {
+    if (!isConnected()) return;
+    try {
+      const devices = await DeviceModel.find();
+      for (const d of devices) {
+        this.devices.set(d.id, {
+          id: d.id,
+          name: d.name,
+          status: "offline", // Mark offline initially on server startup
+          connectionType: d.connectionType,
+          ipAddress: d.ipAddress,
+          lastSeen: d.lastSeen,
+          platform: d.platform,
+          socketId: "",
+        });
+      }
+      console.log(`[db] Loaded ${devices.length} devices from database.`);
+    } catch (err) {
+      console.error("[db] Error loading devices from database:", err);
+    }
+  }
 
   register(socketId: string, deviceId: string, deviceName: string, platform?: string): Device {
     const device: ConnectedDevice = {
@@ -20,7 +66,12 @@ export class DeviceRegistry {
     };
 
     this.devices.set(deviceId, device);
-    return this.toPublicDevice(device);
+    
+    // Asynchronously save to DB
+    const publicDevice = this.toPublicDevice(device);
+    saveDeviceToDB(publicDevice);
+
+    return publicDevice;
   }
 
   unregister(deviceId: string): Device | undefined {
@@ -28,7 +79,14 @@ export class DeviceRegistry {
     if (!device) return undefined;
 
     this.devices.delete(deviceId);
-    return this.toPublicDevice({ ...device, status: "offline" });
+    
+    const offlineDevice = { ...device, status: "offline" as const };
+    const publicDevice = this.toPublicDevice(offlineDevice);
+    
+    // Update status in DB
+    saveDeviceToDB(publicDevice);
+
+    return publicDevice;
   }
 
   unregisterBySocket(socketId: string): Device | undefined {
@@ -59,11 +117,24 @@ export class DeviceRegistry {
 
     device.status = status;
     device.lastSeen = new Date().toISOString();
-    return this.toPublicDevice(device);
+    
+    const publicDevice = this.toPublicDevice(device);
+    saveDeviceToDB(publicDevice);
+
+    return publicDevice;
   }
 
   count(): number {
     return this.devices.size;
+  }
+
+  registerDiscoveryDevice(device: Device): Device {
+    const connectedDevice: ConnectedDevice = {
+      ...device,
+      socketId: "",
+    };
+    this.devices.set(device.id, connectedDevice);
+    return device;
   }
 
   private toPublicDevice(device: ConnectedDevice): Device {
@@ -74,6 +145,31 @@ export class DeviceRegistry {
 
 export class RoomManager {
   private rooms = new Map<string, Room>();
+
+  async loadFromDB(): Promise<void> {
+    if (!isConnected()) return;
+    try {
+      const rooms = await RoomModel.find({ isActive: true });
+      for (const r of rooms) {
+        this.rooms.set(r.id, {
+          id: r.id,
+          name: r.name,
+          members: r.members.map((m) => ({
+            deviceId: m.deviceId,
+            deviceName: m.deviceName,
+            role: m.role,
+            joinedAt: m.joinedAt,
+          })),
+          createdAt: r.createdAt,
+          createdBy: r.createdBy,
+          isActive: r.isActive,
+        });
+      }
+      console.log(`[db] Loaded ${rooms.length} active rooms from database.`);
+    } catch (err) {
+      console.error("[db] Error loading rooms from database:", err);
+    }
+  }
 
   create(name: string, ownerId: string, ownerName: string): Room {
     const room: Room = {
@@ -93,6 +189,8 @@ export class RoomManager {
     };
 
     this.rooms.set(room.id, room);
+    saveRoomToDB(room);
+
     return room;
   }
 
@@ -109,6 +207,7 @@ export class RoomManager {
         joinedAt: new Date().toISOString(),
       };
       room.members.push(member);
+      saveRoomToDB(room);
     }
 
     return room;
@@ -124,6 +223,7 @@ export class RoomManager {
       room.isActive = false;
     }
 
+    saveRoomToDB(room);
     return room;
   }
 
