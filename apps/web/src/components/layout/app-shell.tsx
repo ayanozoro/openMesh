@@ -4,10 +4,12 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { useSocketConnection } from "@/hooks/use-socket";
+import { useOpenMesh } from "@/hooks/use-openmesh";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   useSocketConnection();
+  useOpenMesh();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

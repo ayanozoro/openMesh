@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { motion } from "framer-motion";
 import {
   Shield,
@@ -55,6 +56,8 @@ const item = {
 export default function HomePage() {
   const { devices, rooms, serverStatus, settings } = useAppStore();
   const onlineDevices = devices.filter((d) => d.status === "online").length;
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
@@ -95,7 +98,7 @@ export default function HomePage() {
         {[
           { label: "Online Devices", value: onlineDevices, icon: Users },
           { label: "Active Rooms", value: rooms.filter((r) => r.isActive).length, icon: FolderOpen },
-          { label: "Your Device", value: settings.deviceName, icon: Shield },
+          { label: "Your Device", value: mounted ? settings.deviceName : "", icon: Shield },
         ].map((stat, i) => (
           <motion.div
             key={stat.label}

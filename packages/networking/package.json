@@ -11,6 +11,6 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@openmesh/shared": "workspace:*"
+    "@openmesh/shared": "*"
   }
 }

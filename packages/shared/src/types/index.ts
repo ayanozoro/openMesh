@@ -89,6 +89,7 @@ export const SOCKET_EVENTS = {
   DISCONNECT: "disconnect",
   DEVICE_REGISTER: "device:register",
   DEVICE_LIST: "device:list",
+  DEVICE_HEARTBEAT: "device:heartbeat",
   DEVICE_UPDATE: "device:update",
   DEVICE_DISCOVER: "device:discover",
   ROOM_CREATE: "room:create",

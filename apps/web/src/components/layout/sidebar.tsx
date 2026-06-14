@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -30,6 +31,9 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const { serverStatus, settings } = useAppStore();
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => setMounted(true), []);
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-glass-border bg-sidebar backdrop-blur-xl">
@@ -87,7 +91,9 @@ export function Sidebar() {
             )}
             <span className="text-xs font-medium capitalize">{serverStatus}</span>
           </div>
-          <p className="mt-1 truncate text-[10px] text-muted-foreground">{settings.deviceName}</p>
+          <p className="mt-1 truncate text-[10px] text-muted-foreground">
+            {mounted ? settings.deviceName : ""}
+          </p>
         </div>
       </div>
     </aside>

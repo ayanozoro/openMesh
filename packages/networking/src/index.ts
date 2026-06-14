@@ -9,3 +9,5 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
 export function createDefaultConfig(): PeerConnectionConfig {
   return { iceServers: DEFAULT_ICE_SERVERS };
 }
+
+export { PeerConnectionManager } from "./peer-connection.js";

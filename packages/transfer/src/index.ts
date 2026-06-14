@@ -49,3 +49,6 @@ export function calculateProgress(bytesTransferred: number, totalBytes: number):
     speed: 0,
   };
 }
+
+export * from "./protocol";
+export * from "./transferManager";

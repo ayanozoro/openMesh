@@ -25,12 +25,19 @@ export function useSocketConnection(): RefObject<Socket | null> {
   useEffect(() => {
     setServerStatus("connecting");
 
-    const socket = io(settings.serverUrl, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
+    let socket: Socket;
+    try {
+      socket = io(settings.serverUrl, {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+      });
+    } catch (err) {
+      setServerStatus("disconnected");
+      console.error("Failed to create socket:", err);
+      return () => {};
+    }
 
     socketRef.current = socket;
     activeSocket = socket;
