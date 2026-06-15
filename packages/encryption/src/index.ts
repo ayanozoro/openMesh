@@ -43,3 +43,5 @@ export async function hash(data: ArrayBuffer): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
+export { Sha256Hasher } from "./sha256.js";

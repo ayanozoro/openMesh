@@ -57,6 +57,7 @@ export interface TransferItem {
   checksum?: string;
   roomId?: string;
   peerId?: string;
+  deviceName?: string;
 }
 
 export interface TransferHistoryEntry extends TransferItem {

@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { useSocketConnection } from "@/hooks/use-socket";
 import { useOpenMesh } from "@/hooks/use-openmesh";
+import { useTransferBridge } from "@/hooks/use-transfer";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   useSocketConnection();
   useOpenMesh();
+  useTransferBridge();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

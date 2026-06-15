@@ -33,12 +33,15 @@
 - [ ] Drag & drop with progress tracking
 - [ ] Support for all file types including 100GB+
 
-## Phase 5 — Reliability
+## Phase 5 — Reliability ✅
 
-- [ ] Configurable chunk sizes
-- [ ] Pause / resume transfers
-- [ ] Cancel and retry failed transfers
-- [ ] Transfer history persistence
+- [x] Configurable chunk sizes
+- [x] Pause / resume transfers
+- [x] Cancel and retry failed transfers
+- [x] Transfer history persistence
+- [x] RESUME protocol for missing chunks
+- [x] IndexedDB checkpoint storage
+- [x] SHA-256 integrity verification
 
 ## Phase 6 — Security & SDK
 

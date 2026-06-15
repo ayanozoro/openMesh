@@ -1,38 +1,29 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { History, ArrowUp, ArrowDown, FileText } from "lucide-react";
+import { History, ArrowUp, ArrowDown, FileText, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useAppStore } from "@/stores/app-store";
 import { formatBytes } from "@openmesh/shared";
 
-const mockHistory = [
-  {
-    id: "hist_1",
-    fileName: "project-backup.zip",
-    fileSize: 524288000,
-    direction: "send" as const,
-    status: "completed" as const,
-    deviceName: "MacBook Pro",
-    completedAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: "hist_2",
-    fileName: "presentation.pdf",
-    fileSize: 15728640,
-    direction: "receive" as const,
-    status: "completed" as const,
-    deviceName: "Windows PC",
-    completedAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-];
-
 export default function HistoryPage() {
+  const { transferHistory, clearHistory } = useAppStore();
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">History</h1>
-        <p className="text-muted-foreground">View your past file transfers</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">History</h1>
+          <p className="text-muted-foreground">View your past file transfers</p>
+        </div>
+        {transferHistory.length > 0 && (
+          <Button variant="secondary" size="sm" onClick={clearHistory} className="gap-2">
+            <Trash2 className="h-4 w-4" />
+            Clear
+          </Button>
+        )}
       </div>
 
       <Card>
@@ -42,11 +33,11 @@ export default function HistoryPage() {
             Transfer History
           </CardTitle>
           <CardDescription>
-            Recent transfers across all connected devices
+            Completed and failed transfers persisted locally
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {mockHistory.length === 0 ? (
+          {transferHistory.length === 0 ? (
             <div className="flex flex-col items-center py-12 text-center">
               <FileText className="mb-4 h-12 w-12 text-muted-foreground/50" />
               <p className="font-medium">No transfer history yet</p>
@@ -56,9 +47,9 @@ export default function HistoryPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {mockHistory.map((entry, i) => (
+              {transferHistory.map((entry, i) => (
                 <motion.div
-                  key={entry.id}
+                  key={`${entry.id}-${entry.completedAt}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05 }}
@@ -80,14 +71,19 @@ export default function HistoryPage() {
                       <p className="font-medium">{entry.fileName}</p>
                       <p className="text-xs text-muted-foreground">
                         {formatBytes(entry.fileSize)} · {entry.deviceName}
+                        {entry.roomName ? ` · ${entry.roomName}` : ""}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">
-                      {new Date(entry.completedAt).toLocaleDateString()}
+                      {entry.completedAt
+                        ? new Date(entry.completedAt).toLocaleDateString()
+                        : "—"}
                     </span>
-                    <Badge variant="success">{entry.status}</Badge>
+                    <Badge variant={entry.status === "completed" ? "success" : "destructive"}>
+                      {entry.status}
+                    </Badge>
                   </div>
                 </motion.div>
               ))}

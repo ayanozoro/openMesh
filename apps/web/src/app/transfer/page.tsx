@@ -10,37 +10,41 @@ import {
   Play,
   RotateCcw,
   FolderOpen,
+  Monitor,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAppStore } from "@/stores/app-store";
-import { formatBytes, generateId } from "@openmesh/shared";
-import type { TransferItem } from "@openmesh/shared";
+import { useTransfer } from "@/hooks/use-transfer";
+import { formatBytes } from "@openmesh/shared";
 
 export default function TransferPage() {
-  const { transfers, addTransfer, updateTransfer, removeTransfer } = useAppStore();
+  const { transfers, devices, deviceId, serverStatus } = useAppStore();
+  const {
+    sendFiles,
+    pauseTransfer,
+    resumeTransfer,
+    cancelTransfer,
+    retryTransfer,
+    selectedPeerId,
+    setSelectedPeerId,
+  } = useTransfer();
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const otherDevices = devices.filter((d) => d.id !== deviceId && d.status === "online");
 
   const handleFiles = useCallback(
-    (files: FileList | File[]) => {
-      Array.from(files).forEach((file) => {
-        const transfer: TransferItem = {
-          id: generateId("xfer"),
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type || "application/octet-stream",
-          status: "pending",
-          direction: "send",
-          progress: 0,
-          bytesTransferred: 0,
-          speed: 0,
-          startedAt: new Date().toISOString(),
-        };
-        addTransfer(transfer);
-      });
+    async (files: FileList | File[]) => {
+      setError(null);
+      try {
+        await sendFiles(files, { peerId: selectedPeerId ?? undefined });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to start transfer");
+      }
     },
-    [addTransfer],
+    [sendFiles, selectedPeerId],
   );
 
   const onDrop = useCallback(
@@ -48,7 +52,7 @@ export default function TransferPage() {
       e.preventDefault();
       setIsDragging(false);
       if (e.dataTransfer.files.length > 0) {
-        handleFiles(e.dataTransfer.files);
+        void handleFiles(e.dataTransfer.files);
       }
     },
     [handleFiles],
@@ -80,6 +84,48 @@ export default function TransferPage() {
         </p>
       </div>
 
+      {serverStatus !== "connected" && (
+        <Card className="border-destructive/30">
+          <CardContent className="pt-4 text-sm text-muted-foreground">
+            Connect to the signaling server before transferring files.
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Monitor className="h-4 w-4" />
+            Target Device
+          </CardTitle>
+          <CardDescription>Select a peer for direct file transfers</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {otherDevices.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No online devices found on the network.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {otherDevices.map((device) => (
+                <Button
+                  key={device.id}
+                  size="sm"
+                  variant={selectedPeerId === device.id ? "default" : "secondary"}
+                  onClick={() => setSelectedPeerId(device.id)}
+                >
+                  {device.name}
+                </Button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {error && (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardContent className="pt-4 text-sm text-destructive">{error}</CardContent>
+        </Card>
+      )}
+
       <motion.div
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -104,14 +150,14 @@ export default function TransferPage() {
               {isDragging ? "Drop files here" : "Drag & drop files here"}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Supports images, videos, documents, ZIP, ISO, and large files (100GB+)
+              Chunked P2P transfers with pause, resume, and retry support
             </p>
             <label className="mt-4 cursor-pointer">
               <input
                 type="file"
                 multiple
                 className="hidden"
-                onChange={(e) => e.target.files && handleFiles(e.target.files)}
+                onChange={(e) => e.target.files && void handleFiles(e.target.files)}
               />
               <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium glass hover:bg-white/10 text-foreground h-12 rounded-xl px-6">
                 Browse Files
@@ -157,7 +203,11 @@ export default function TransferPage() {
                           <p className="font-medium">{transfer.fileName}</p>
                           <p className="text-xs text-muted-foreground">
                             {formatBytes(transfer.fileSize)}
+                            {transfer.deviceName ? ` · ${transfer.deviceName}` : ""}
                           </p>
+                          {transfer.error && (
+                            <p className="text-xs text-destructive mt-0.5">{transfer.error}</p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -168,9 +218,7 @@ export default function TransferPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() =>
-                              updateTransfer(transfer.id, { status: "transferring" })
-                            }
+                            onClick={() => resumeTransfer(transfer.id)}
                             aria-label="Resume transfer"
                           >
                             <Play className="h-4 w-4" />
@@ -180,7 +228,7 @@ export default function TransferPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => updateTransfer(transfer.id, { status: "paused" })}
+                            onClick={() => pauseTransfer(transfer.id)}
                             aria-label="Pause transfer"
                           >
                             <Pause className="h-4 w-4" />
@@ -190,26 +238,22 @@ export default function TransferPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() =>
-                              updateTransfer(transfer.id, {
-                                status: "pending",
-                                progress: 0,
-                                bytesTransferred: 0,
-                              })
-                            }
+                            onClick={() => void retryTransfer(transfer.id)}
                             aria-label="Retry transfer"
                           >
                             <RotateCcw className="h-4 w-4" />
                           </Button>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeTransfer(transfer.id)}
-                          aria-label="Cancel transfer"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        {!["completed", "cancelled"].includes(transfer.status) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => cancelTransfer(transfer.id)}
+                            aria-label="Cancel transfer"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                     {transfer.progress > 0 && (
@@ -223,6 +267,7 @@ export default function TransferPage() {
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {transfer.progress.toFixed(1)}% complete
+                          {transfer.checksum ? ` · verified` : ""}
                         </p>
                       </div>
                     )}

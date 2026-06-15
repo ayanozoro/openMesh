@@ -14,7 +14,6 @@ import {
   File,
   X,
   ArrowLeft,
-  Shield,
   Wifi,
   Check,
 } from "lucide-react";
@@ -23,8 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useAppStore } from "@/stores/app-store";
-import { formatBytes, generateId, SOCKET_EVENTS } from "@openmesh/shared";
-import type { Room, TextMessagePayload, TransferItem } from "@openmesh/shared";
+import { useTransfer } from "@/hooks/use-transfer";
+import { formatBytes, SOCKET_EVENTS } from "@openmesh/shared";
+import type { Room, TextMessagePayload } from "@openmesh/shared";
 
 export default function RoomsPage() {
   const {
@@ -39,8 +39,9 @@ export default function RoomsPage() {
     setRooms,
     setActiveRoom,
     addMessage,
-    addTransfer,
   } = useAppStore();
+
+  const { sendFiles } = useTransfer();
 
   // Component states
   const [createName, setCreateName] = useState("");
@@ -49,6 +50,7 @@ export default function RoomsPage() {
   const [chatInput, setChatInput] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   // Active room object
   const activeRoom = rooms.find((r) => r.id === activeRoomId && r.isActive);
@@ -178,26 +180,16 @@ export default function RoomsPage() {
 
   // Handle file drop in active room
   const handleFiles = useCallback(
-    (files: FileList | File[]) => {
+    async (files: FileList | File[]) => {
       if (!activeRoomId) return;
-      Array.from(files).forEach((file) => {
-        const transfer: TransferItem = {
-          id: generateId("xfer"),
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type || "application/octet-stream",
-          status: "pending",
-          direction: "send",
-          progress: 0,
-          bytesTransferred: 0,
-          speed: 0,
-          startedAt: new Date().toISOString(),
-          roomId: activeRoomId,
-        };
-        addTransfer(transfer);
-      });
+      setTransferError(null);
+      try {
+        await sendFiles(files, { roomId: activeRoomId });
+      } catch (err) {
+        setTransferError(err instanceof Error ? err.message : "Failed to start room transfer");
+      }
     },
-    [activeRoomId, addTransfer],
+    [activeRoomId, sendFiles],
   );
 
   const onDrop = useCallback(
@@ -205,7 +197,7 @@ export default function RoomsPage() {
       e.preventDefault();
       setIsDragging(false);
       if (e.dataTransfer.files.length > 0) {
-        handleFiles(e.dataTransfer.files);
+        void handleFiles(e.dataTransfer.files);
       }
     },
     [handleFiles],
@@ -541,6 +533,9 @@ export default function RoomsPage() {
                 onDragLeave={onDragLeave}
                 className="space-y-4"
               >
+                {transferError && (
+                  <p className="text-sm text-destructive">{transferError}</p>
+                )}
                 <Card
                   glow={isDragging}
                   className={`border-2 border-dashed transition-colors ${

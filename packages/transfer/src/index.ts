@@ -1,54 +1,11 @@
-import { DEFAULT_SETTINGS } from "@openmesh/shared";
+import { calculateProgress, type TransferProgress } from "./progress.js";
+import { ChunkManager, type ChunkManagerOptions } from "./chunkManager.js";
 
-export interface ChunkManagerOptions {
-  chunkSize?: number;
-}
+export { ChunkManager, type ChunkManagerOptions };
+export type { TransferProgress };
+export { calculateProgress };
 
-export class ChunkManager {
-  private chunkSize: number;
-
-  constructor(options: ChunkManagerOptions = {}) {
-    this.chunkSize = options.chunkSize ?? DEFAULT_SETTINGS.chunkSize;
-  }
-
-  getChunkSize(): number {
-    return this.chunkSize;
-  }
-
-  getTotalChunks(fileSize: number): number {
-    return Math.ceil(fileSize / this.chunkSize);
-  }
-
-  async *readChunks(file: File): AsyncGenerator<{ index: number; data: ArrayBuffer; offset: number }> {
-    let offset = 0;
-    let index = 0;
-
-    while (offset < file.size) {
-      const end = Math.min(offset + this.chunkSize, file.size);
-      const blob = file.slice(offset, end);
-      const data = await blob.arrayBuffer();
-      yield { index, data, offset };
-      offset = end;
-      index++;
-    }
-  }
-}
-
-export interface TransferProgress {
-  bytesTransferred: number;
-  totalBytes: number;
-  progress: number;
-  speed: number;
-}
-
-export function calculateProgress(bytesTransferred: number, totalBytes: number): TransferProgress {
-  return {
-    bytesTransferred,
-    totalBytes,
-    progress: totalBytes > 0 ? (bytesTransferred / totalBytes) * 100 : 0,
-    speed: 0,
-  };
-}
-
-export * from "./protocol";
-export * from "./transferManager";
+export * from "./protocol.js";
+export * from "./transferManager.js";
+export * from "./stateStore.js";
+export * from "./resume.js";

@@ -2,7 +2,14 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppSettings, Device, Room, TransferItem, TextMessagePayload } from "@openmesh/shared";
+import type {
+  AppSettings,
+  Device,
+  Room,
+  TransferItem,
+  TextMessagePayload,
+  TransferHistoryEntry,
+} from "@openmesh/shared";
 import { DEFAULT_SETTINGS, generateId, getDefaultDeviceName } from "@openmesh/shared";
 import type { Socket } from "socket.io-client";
 
@@ -13,6 +20,8 @@ interface AppState {
   rooms: Room[];
   activeRoomId: string | null;
   transfers: TransferItem[];
+  transferHistory: TransferHistoryEntry[];
+  selectedPeerId: string | null;
   isConnected: boolean;
   serverStatus: "connected" | "disconnected" | "connecting";
   socket: Socket | null;
@@ -31,6 +40,9 @@ interface AppState {
   setServerStatus: (status: AppState["serverStatus"]) => void;
   setSocket: (socket: Socket | null) => void;
   addMessage: (roomId: string, message: TextMessagePayload) => void;
+  addHistoryEntry: (entry: TransferHistoryEntry) => void;
+  setSelectedPeerId: (peerId: string | null) => void;
+  clearHistory: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -45,6 +57,8 @@ export const useAppStore = create<AppState>()(
       rooms: [],
       activeRoomId: null,
       transfers: [],
+      transferHistory: [],
+      selectedPeerId: null,
       isConnected: false,
       serverStatus: "disconnected",
       socket: null,
@@ -107,8 +121,14 @@ export const useAppStore = create<AppState>()(
       addMessage: (roomId, message) =>
         set((state) => {
           const roomMessages = state.messages[roomId] || [];
-          // Avoid duplicate messages if received multiple times
-          if (roomMessages.some((m) => m.timestamp === message.timestamp && m.senderId === message.senderId && m.content === message.content)) {
+          if (
+            roomMessages.some(
+              (m) =>
+                m.timestamp === message.timestamp &&
+                m.senderId === message.senderId &&
+                m.content === message.content,
+            )
+          ) {
             return {};
           }
           return {
@@ -118,6 +138,15 @@ export const useAppStore = create<AppState>()(
             },
           };
         }),
+
+      addHistoryEntry: (entry) =>
+        set((state) => ({
+          transferHistory: [entry, ...state.transferHistory].slice(0, 200),
+        })),
+
+      setSelectedPeerId: (peerId) => set({ selectedPeerId: peerId }),
+
+      clearHistory: () => set({ transferHistory: [] }),
     }),
     {
       name: "openmesh-storage",
@@ -125,6 +154,8 @@ export const useAppStore = create<AppState>()(
         deviceId: state.deviceId,
         settings: state.settings,
         activeRoomId: state.activeRoomId,
+        transferHistory: state.transferHistory,
+        selectedPeerId: state.selectedPeerId,
       }),
     },
   ),

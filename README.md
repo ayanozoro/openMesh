@@ -100,7 +100,7 @@ client.sendText("Hello!");
 | 2 | 🔜 Next | Device Discovery, Rooms |
 | 3 | Planned | WebRTC, Text Transfer |
 | 4 | Planned | File Transfer Engine |
-| 5 | Planned | Chunking, Resume |
+| 5 | ✅ Done | Chunking, Resume |
 | 6 | Planned | Encryption, SDK |
 | 7 | Planned | Docs, Tests, Release |
 

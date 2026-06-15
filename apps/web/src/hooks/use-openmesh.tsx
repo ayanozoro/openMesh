@@ -8,29 +8,39 @@ let client: OpenMesh | null = null;
 
 export function useOpenMesh(): OpenMesh | null {
   const sdkRef = useRef<OpenMesh | null>(null);
-  const { addMessage } = useAppStore();
+  const { addMessage, deviceId, settings } = useAppStore();
 
   useEffect(() => {
     if (sdkRef.current) return;
 
-    client = new OpenMesh({});
+    client = new OpenMesh({
+      deviceId,
+      deviceName: settings.deviceName,
+      serverUrl: settings.serverUrl,
+    });
     sdkRef.current = client;
 
-    client.connect().then(() => {
-      client.onDataMessage((from, payload) => {
-        if (payload && payload.roomId) {
-          addMessage(payload.roomId, payload);
-        }
+    client.updateSettings(settings);
+
+    client
+      .connect()
+      .then(() => {
+        client?.onDataMessage((_from, payload) => {
+          if (payload && typeof payload === "object" && "roomId" in payload) {
+            addMessage((payload as { roomId: string }).roomId, payload as Parameters<typeof addMessage>[1]);
+          }
+        });
+      })
+      .catch(() => {
+        // ignore for now
       });
-    }).catch(() => {
-      // ignore for now
-    });
 
     return () => {
       if (sdkRef.current) sdkRef.current.disconnect();
       sdkRef.current = null;
+      client = null;
     };
-  }, [addMessage]);
+  }, [addMessage, deviceId, settings.deviceName, settings.serverUrl]);
 
   return sdkRef.current;
 }

@@ -10,12 +10,20 @@ import type {
 import { io, type Socket } from "socket.io-client";
 import { createDefaultConfig } from "@openmesh/networking";
 import PeerConnectionManager from "@openmesh/networking/src/peer-connection.js";
-import { TransferManager } from "@openmesh/transfer/src/transferManager.js";
+import { TransferManager, type TransferHandle } from "@openmesh/transfer/src/transferManager.js";
+
+export type { TransferHandle };
 
 export interface OpenMeshOptions {
   serverUrl?: string;
   deviceName?: string;
   deviceId?: string;
+}
+
+export interface SendFileOptions {
+  roomId?: string;
+  chunkSize?: number;
+  enableEncryption?: boolean;
 }
 
 export class OpenMesh {
@@ -27,8 +35,9 @@ export class OpenMesh {
   private roomUpdateCb: ((room: Room) => void) | null = null;
   private peers: Map<string, PeerConnectionManager> = new Map();
   private dataChannels: Map<string, RTCDataChannel> = new Map();
-  private dataMessageCb: ((from: string, payload: any) => void) | null = null;
+  private dataMessageCb: ((from: string, payload: unknown) => void) | null = null;
   private transferManager: TransferManager;
+  private fileCache: Map<string, File> = new Map();
 
   constructor(options: OpenMeshOptions = {}) {
     this.deviceId = options.deviceId ?? generateId("dev");
@@ -40,18 +49,12 @@ export class OpenMesh {
     this.transferManager = new TransferManager();
   }
 
-  private arrayBufferToBase64(buffer: ArrayBuffer): string {
-    let binary = "";
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    if (typeof btoa === "function") return btoa(binary);
-    const Buf = (globalThis as any).Buffer;
-    if (Buf && typeof Buf.from === "function") return Buf.from(buffer).toString("base64");
-    return "";
-  }
-
   getSettings(): AppSettings {
     return this._settings;
+  }
+
+  updateSettings(updates: Partial<AppSettings>): void {
+    this._settings = { ...this._settings, ...updates };
   }
 
   async connect(): Promise<void> {
@@ -72,12 +75,10 @@ export class OpenMesh {
           const registerPayload: DeviceRegisterPayload = {
             deviceId: this.deviceId,
             deviceName: this._settings.deviceName,
-            platform: typeof navigator !== "undefined" ? (navigator as any).platform : undefined,
+            platform: typeof navigator !== "undefined" ? (navigator as Navigator & { platform?: string }).platform : undefined,
           };
 
-          socket.emit(SOCKET_EVENTS.DEVICE_REGISTER, registerPayload, (_resp: any) => {
-            /* ignore */
-          });
+          socket.emit(SOCKET_EVENTS.DEVICE_REGISTER, registerPayload, () => { /* ignore */ });
 
           socket.on(SOCKET_EVENTS.DEVICE_UPDATE, (d: Device) => {
             if (this.deviceUpdateCb) this.deviceUpdateCb(d);
@@ -87,7 +88,6 @@ export class OpenMesh {
             if (this.roomUpdateCb) this.roomUpdateCb(r);
           });
 
-          // WebRTC signaling handlers
           socket.on(SOCKET_EVENTS.SIGNAL_OFFER, async (payload: WebRTCSignalPayload) => {
             if (payload.toDeviceId !== this.deviceId) return;
             const from = payload.fromDeviceId;
@@ -101,20 +101,7 @@ export class OpenMesh {
                 });
               },
               onDataChannel: (dc: RTCDataChannel) => {
-                this.dataChannels.set(from, dc);
-                try { this.transferManager.attachDataChannel(from, dc); } catch (_) {}
-                dc.onmessage = (ev: MessageEvent) => {
-                  try {
-                    const text = typeof ev.data === "string" ? ev.data : null;
-                    const p = text ? JSON.parse(text) : ev.data;
-                    // forward to transfer manager
-                    try { this.transferManager.handleIncoming(from, p); } catch (_) {}
-                    if (this.dataMessageCb) this.dataMessageCb(from, p);
-                  } catch (_) {
-                    try { this.transferManager.handleIncoming(from, ev.data); } catch (_) {}
-                    if (this.dataMessageCb) this.dataMessageCb(from, ev.data);
-                  }
-                };
+                this.wireDataChannel(from, dc);
               },
             });
 
@@ -154,6 +141,26 @@ export class OpenMesh {
     });
   }
 
+  private wireDataChannel(peerId: string, dc: RTCDataChannel) {
+    this.dataChannels.set(peerId, dc);
+    this.transferManager.attachDataChannel(peerId, dc);
+    dc.onmessage = (ev: MessageEvent) => {
+      this.routeDataMessage(peerId, ev.data);
+    };
+  }
+
+  private routeDataMessage(peerId: string, data: unknown) {
+    try {
+      const text = typeof data === "string" ? data : null;
+      const p = text ? JSON.parse(text) : data;
+      this.transferManager.handleIncoming(peerId, p);
+      if (this.dataMessageCb) this.dataMessageCb(peerId, p);
+    } catch {
+      this.transferManager.handleIncoming(peerId, data);
+      if (this.dataMessageCb) this.dataMessageCb(peerId, data);
+    }
+  }
+
   disconnect(): void {
     this.connected = false;
     if (this.socket) {
@@ -190,6 +197,8 @@ export class OpenMesh {
   async startPeerConnection(toDeviceId: string, roomId: string): Promise<void> {
     if (!this.connected || !this.socket) throw new Error("Not connected. Call connect() first.");
 
+    if (this.peers.has(toDeviceId)) return;
+
     const pc = new PeerConnectionManager(createDefaultConfig(), {
       onIceCandidate: (candidate) => {
         this.socket?.emit(SOCKET_EVENTS.SIGNAL_ICE, {
@@ -200,36 +209,12 @@ export class OpenMesh {
         });
       },
       onDataChannel: (dc) => {
-        this.dataChannels.set(toDeviceId, dc);
-        dc.onmessage = (ev) => {
-          try {
-            const text = typeof ev.data === "string" ? ev.data : null;
-            const p = text ? JSON.parse(text) : ev.data;
-            try { this.transferManager.handleIncoming(toDeviceId, p); } catch (_) {}
-            if (this.dataMessageCb) this.dataMessageCb(toDeviceId, p);
-          } catch (_) {
-            try { this.transferManager.handleIncoming(toDeviceId, ev.data); } catch (_) {}
-            if (this.dataMessageCb) this.dataMessageCb(toDeviceId, ev.data);
-          }
-        };
+        this.wireDataChannel(toDeviceId, dc);
       },
     });
 
-    // create local data channel so remote receives ondatachannel
     const dc = pc.createDataChannel("om-channel");
-    this.dataChannels.set(toDeviceId, dc);
-    try { this.transferManager.attachDataChannel(toDeviceId, dc); } catch (_) {}
-    dc.onmessage = (ev) => {
-      try {
-        const text = typeof ev.data === "string" ? ev.data : null;
-        const p = text ? JSON.parse(text) : ev.data;
-        try { this.transferManager.handleIncoming(toDeviceId, p); } catch (_) {}
-        if (this.dataMessageCb) this.dataMessageCb(toDeviceId, p);
-      } catch (_) {
-        try { this.transferManager.handleIncoming(toDeviceId, ev.data); } catch (_) {}
-        if (this.dataMessageCb) this.dataMessageCb(toDeviceId, ev.data);
-      }
-    };
+    this.wireDataChannel(toDeviceId, dc);
 
     this.peers.set(toDeviceId, pc);
 
@@ -243,24 +228,75 @@ export class OpenMesh {
     });
   }
 
-  async sendFile(file: File, toDeviceId: string, roomId?: string): Promise<string> {
+  async sendFile(file: File, toDeviceId: string, options: SendFileOptions = {}): Promise<TransferHandle> {
     if (!this.connected) throw new Error("Not connected. Call connect() first.");
     if (!toDeviceId) throw new Error("Target peer required for P2P file send.");
 
-    if (!this.peers.has(toDeviceId)) await this.startPeerConnection(toDeviceId, roomId ?? "");
+    await this.startPeerConnection(toDeviceId, options.roomId ?? "");
 
     const dc = this.dataChannels.get(toDeviceId);
-    if (!dc) throw new Error("DataChannel not ready");
+    if (!dc || dc.readyState !== "open") {
+      await this.waitForDataChannel(toDeviceId);
+    }
 
-    // Use TransferManager for sending (managed lifecycle). This is a higher-level API
-    // that currently sends chunk headers + binary payloads. Encryption integration
-    // will be added in TransferManager in subsequent steps.
+    const channel = this.dataChannels.get(toDeviceId);
+    if (!channel) throw new Error("DataChannel not ready");
 
-    const handle = await this.transferManager.sendFile(dc, file, { chunkSize: this._settings.chunkSize });
-    return handle.transferId;
+    const handle = await this.transferManager.sendFile(channel, file, {
+      chunkSize: options.chunkSize ?? this._settings.chunkSize,
+      enableEncryption: options.enableEncryption ?? this._settings.enableEncryption,
+      peerId: toDeviceId,
+    });
+
+    this.fileCache.set(handle.transferId, file);
+    return handle;
   }
 
-  // Expose the transfer manager for advanced usage
+  async retryFile(transferId: string, toDeviceId: string, file?: File, options: SendFileOptions = {}): Promise<TransferHandle> {
+    const cached = file ?? this.fileCache.get(transferId);
+    if (!cached) throw new Error("File not available for retry. Re-select the file.");
+
+    await this.startPeerConnection(toDeviceId, options.roomId ?? "");
+    const channel = this.dataChannels.get(toDeviceId);
+    if (!channel) throw new Error("DataChannel not ready");
+
+    const handle = await this.transferManager.retryTransfer(channel, cached, transferId, {
+      chunkSize: options.chunkSize ?? this._settings.chunkSize,
+      enableEncryption: options.enableEncryption ?? this._settings.enableEncryption,
+      peerId: toDeviceId,
+    });
+
+    this.fileCache.set(handle.transferId, cached);
+    return handle;
+  }
+
+  getTransferHandle(transferId: string): TransferHandle | undefined {
+    return this.transferManager.getHandle(transferId);
+  }
+
+  cacheFileForTransfer(transferId: string, file: File): void {
+    this.fileCache.set(transferId, file);
+  }
+
+  private waitForDataChannel(peerId: string, timeoutMs = 10000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      const check = () => {
+        const dc = this.dataChannels.get(peerId);
+        if (dc?.readyState === "open") {
+          resolve();
+          return;
+        }
+        if (Date.now() - start > timeoutMs) {
+          reject(new Error("DataChannel connection timeout"));
+          return;
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
   getTransferManager(): TransferManager {
     return this.transferManager;
   }
@@ -273,7 +309,7 @@ export class OpenMesh {
     this.roomUpdateCb = cb;
   }
 
-  onDataMessage(cb: (fromDeviceId: string, payload: any) => void): void {
+  onDataMessage(cb: (fromDeviceId: string, payload: unknown) => void): void {
     this.dataMessageCb = cb;
   }
 

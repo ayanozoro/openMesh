@@ -66,6 +66,11 @@ export interface TransferOptions {
   retryLimit?: number;
   ackTimeout?: number;
   maxBufferedAmount?: number; // bytes threshold for adaptive windowing
+  peerId?: string;
+  enableEncryption?: boolean;
+  resumeFromIndex?: number;
+  existingTransferId?: string;
+  restoredAckedIndexes?: number[];
 }
 
 export type TransferState = "idle" | "sending" | "receiving" | "paused" | "completed" | "cancelled" | "error";
