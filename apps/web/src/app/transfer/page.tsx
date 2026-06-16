@@ -11,6 +11,7 @@ import {
   RotateCcw,
   FolderOpen,
   Monitor,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ export default function TransferPage() {
     resumeTransfer,
     cancelTransfer,
     retryTransfer,
+    downloadFile,
     selectedPeerId,
     setSelectedPeerId,
   } = useTransfer();
@@ -252,6 +254,16 @@ export default function TransferPage() {
                             aria-label="Cancel transfer"
                           >
                             <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {transfer.status === "completed" && transfer.direction === "receive" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => downloadFile(transfer.id)}
+                            aria-label="Download file"
+                          >
+                            <Download className="h-4 w-4" />
                           </Button>
                         )}
                       </div>

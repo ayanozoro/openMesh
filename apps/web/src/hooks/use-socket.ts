@@ -105,7 +105,9 @@ export function useSocketConnection(): RefObject<Socket | null> {
 
     return () => {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
-      socket.disconnect();
+      try {
+        socket.disconnect();
+      } catch (e) {}
       socketRef.current = null;
       activeSocket = null;
       setSocket(null);

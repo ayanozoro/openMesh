@@ -23,8 +23,39 @@ export function createSocketServer(httpServer: HttpServer): Server {
       origin: process.env.CORS_ORIGIN ?? "*",
       methods: ["GET", "POST"],
     },
-    pingInterval: 10000,
-    pingTimeout: 5000,
+    // Use more lenient ping settings to tolerate intermittent latency
+    // Defaults are: pingInterval 25000, pingTimeout 60000
+    pingInterval: Number(process.env.SOCKET_PING_INTERVAL ?? 25000),
+    pingTimeout: Number(process.env.SOCKET_PING_TIMEOUT ?? 20000),
+  });
+
+  // Log HTTP upgrade attempts to diagnose websocket handshake issues
+  try {
+    httpServer.on("upgrade", (req, socket, head) => {
+      try {
+        console.log(`[upgrade] HTTP upgrade requested: ${req.url} from ${req.socket.remoteAddress}`);
+      } catch (err) {
+        console.error("[upgrade] Error logging upgrade request", err);
+      }
+    });
+  } catch (err) {
+    console.error("[upgrade] Failed to attach upgrade listener", err);
+  }
+
+  // Engine-level connection errors (handshake failures)
+  try {
+    // engine may not be initialized immediately in some environments
+    if ((io as any).engine && (io as any).engine.on) {
+      (io as any).engine.on("connection_error", (err: unknown) => {
+        console.error("[socket][engine] connection_error:", err);
+      });
+    }
+  } catch (err) {
+    console.error("[socket] Failed to attach engine connection_error listener", err);
+  }
+
+  io.on("error", (err) => {
+    console.error("[socket] Server error:", err);
   });
 
   const deviceRegistry = new DeviceRegistry();
@@ -49,7 +80,8 @@ export function createSocketServer(httpServer: HttpServer): Server {
   // Periodic cleanup of stale WebSocket devices (heartbeat check)
   const cleanupInterval = setInterval(() => {
     const now = Date.now();
-    const maxAge = 30000; // 30 seconds max age since last seen
+    // increase grace window to tolerate background throttling / transient network
+    const maxAge = Number(process.env.DEVICE_MAX_AGE_MS ?? 60000); // 60s
 
     const devices = deviceRegistry.getAll();
     devices.forEach((device) => {
@@ -68,6 +100,14 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
   io.on("connection", (socket: Socket) => {
     console.log(`[socket] Client connected: ${socket.id}`);
+
+    // Refresh lastSeen on any incoming event to reduce false timeouts
+    socket.onAny(() => {
+      const data = socket.data as SocketData;
+      if (data?.deviceId) {
+        deviceRegistry.updateStatus(data.deviceId, "online");
+      }
+    });
 
     socket.on(SOCKET_EVENTS.DEVICE_REGISTER, (payload: DeviceRegisterPayload, callback?) => {
       try {

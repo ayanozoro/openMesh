@@ -5,7 +5,7 @@ import type { TransferHandle } from "@openmesh/sdk";
 import type { TransferHistoryEntry, TransferItem } from "@openmesh/shared";
 import { generateId } from "@openmesh/shared";
 import { useAppStore } from "@/stores/app-store";
-import { getOpenMeshClient } from "@/hooks/use-openmesh";
+import { getOpenMeshClient, waitForOpenMeshClient } from "@/hooks/use-openmesh";
 
 const fileCache = new Map<string, File>();
 const handlesRef = { current: new Map<string, TransferHandle>() };
@@ -84,22 +84,34 @@ export function useTransferBridge(): void {
     };
 
     const onComplete = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { transferId: string; fileHash?: string };
+      const detail = (e as CustomEvent).detail as {
+        transferId: string;
+        checksum?: string;
+        file?: File | Blob;
+        manifest?: any;
+      };
+
       const state = useAppStore.getState();
       const transfer = state.transfers.find((t) => t.id === detail.transferId);
       updateTransfer(detail.transferId, {
         status: "completed",
         progress: 100,
         completedAt: new Date().toISOString(),
-        checksum: detail.fileHash,
+        checksum: detail.checksum,
       });
+      // Cache the received file (or blob) for download
+      if (detail.file) {
+        const cachedFile = detail.file instanceof File
+          ? detail.file
+          : new File([detail.file], detail.manifest?.fileName ?? "downloaded_file");
+        fileCache.set(detail.transferId, cachedFile);
+      }
       if (transfer) {
         addHistoryEntry(
-          buildHistoryEntry(transfer, "completed", state.devices, state.rooms, detail.fileHash),
+          buildHistoryEntry(transfer, "completed", state.devices, state.rooms, detail.checksum),
         );
       }
       handlesRef.current.delete(detail.transferId);
-      fileCache.delete(detail.transferId);
     };
 
     const onTransferStart = (e: Event) => {
@@ -131,6 +143,7 @@ export function useTransferBridge(): void {
       const detail = (e as CustomEvent).detail as {
         transferId: string;
         checksum?: string;
+        file?: File | Blob;
       };
 
       const state = useAppStore.getState();
@@ -141,6 +154,11 @@ export function useTransferBridge(): void {
         completedAt: new Date().toISOString(),
         checksum: detail.checksum,
       });
+      // Cache the received file for download functionality
+      if (detail.file) {
+        const cachedFile = detail.file instanceof File ? detail.file : new File([detail.file], "downloaded_file");
+        fileCache.set(detail.transferId, cachedFile);
+      }
       if (transfer) {
         addHistoryEntry(
           buildHistoryEntry(transfer, "completed", state.devices, state.rooms, detail.checksum),
@@ -247,8 +265,14 @@ export function useTransfer() {
 
   const sendFiles = useCallback(
     async (files: FileList | File[], options?: { peerId?: string; roomId?: string }) => {
-      const client = getOpenMeshClient();
-      if (!client) throw new Error("OpenMesh client not ready");
+      let client = getOpenMeshClient();
+      if (!client) {
+        try {
+          client = await waitForOpenMeshClient(5000);
+        } catch (err) {
+          throw new Error("OpenMesh client not ready");
+        }
+      }
 
       const targetPeer = resolvePeerId(options?.peerId, options?.roomId ?? activeRoomId ?? undefined);
       if (!targetPeer) throw new Error("No peer available. Select a device or join a room with members.");
@@ -364,6 +388,24 @@ export function useTransfer() {
     [settings.chunkSize, settings.enableEncryption, updateTransfer],
   );
 
+  // Method to download a completed file
+  const downloadFile = (transferId: string) => {
+    const file = fileCache.get(transferId);
+    if (!file) {
+      console.warn(`File for transfer ${transferId} not found in cache`);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    // Append to body to ensure click works in all browsers
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return {
     sendFiles,
     pauseTransfer,
@@ -373,5 +415,6 @@ export function useTransfer() {
     selectedPeerId,
     setSelectedPeerId,
     cacheFile: (transferId: string, file: File) => fileCache.set(transferId, file),
+    downloadFile,
   };
 }
