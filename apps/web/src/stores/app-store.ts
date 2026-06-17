@@ -51,6 +51,7 @@ export const useAppStore = create<AppState>()(
       deviceId: generateId("dev"),
       settings: {
         ...DEFAULT_SETTINGS,
+        serverUrl: (typeof process !== "undefined" && (process as { env?: Record<string, string | undefined> }).env?.NEXT_PUBLIC_SERVER_URL) || DEFAULT_SETTINGS.serverUrl,
         deviceName: getDefaultDeviceName(),
       },
       devices: [],
