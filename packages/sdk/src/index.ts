@@ -8,9 +8,8 @@ import type {
   WebRTCSignalPayload,
 } from "@openmesh/shared";
 import { io, type Socket } from "socket.io-client";
-import { createDefaultConfig } from "@openmesh/networking";
-import PeerConnectionManager from "@openmesh/networking/src/peer-connection.js";
-import { TransferManager, type TransferHandle } from "@openmesh/transfer/src/transferManager.js";
+import { createDefaultConfig, PeerConnectionManager } from "@openmesh/networking";
+import { TransferManager, type TransferHandle } from "@openmesh/transfer";
 
 export type { TransferHandle };
 
@@ -24,6 +23,7 @@ export interface SendFileOptions {
   roomId?: string;
   chunkSize?: number;
   enableEncryption?: boolean;
+  recipientPublicKeyB64?: string;
 }
 
 export class OpenMesh {
@@ -91,7 +91,41 @@ export class OpenMesh {
           socket.on(SOCKET_EVENTS.SIGNAL_OFFER, async (payload: WebRTCSignalPayload) => {
             if (payload.toDeviceId !== this.deviceId) return;
             const from = payload.fromDeviceId;
-            const pc = new PeerConnectionManager(createDefaultConfig(), {
+
+            // Check if we already have a peer connection for this device.
+            // Use deterministic device-ID comparison to resolve glare:
+            // the device with the HIGHER deviceId wins, the loser accepts the
+            // winner's offer via rollback.  This prevents crossed/incompatible
+            // SDP pairs that would prevent ICE from ever connecting.
+            const existing = this.peers.get(from);
+            if (existing) {
+              const state = existing.getSignalingState();
+              if (state === "stable") {
+                if (existing.hasRemoteDescription()) {
+                  console.warn(`[OpenMesh] Ignoring duplicate offer from ${from} (already negotiated)`);
+                  return;
+                }
+                // No offer sent yet (startPeerConnection still in createOffer).
+                // Higher deviceId wins — only the loser accepts the remote offer.
+                if (this.deviceId > from) {
+                  console.warn(`[OpenMesh] Glare win (pre-offer): ignoring ${from}`);
+                  return;
+                }
+                // Loser — accept their offer below
+              } else if (state === "have-remote-offer") {
+                console.warn(`[OpenMesh] Ignoring duplicate offer from ${from} (state=have-remote-offer)`);
+                return;
+              } else if (state === "have-local-offer") {
+                // Both sides sent offers simultaneously (glare).
+                if (this.deviceId > from) {
+                  console.warn(`[OpenMesh] Glare win: keeping our offer, ignoring ${from}`);
+                  return;
+                }
+                // Loser — handleOfferAndCreateAnswer will rollback and accept theirs
+              }
+            }
+
+            const pc = existing ?? new PeerConnectionManager(createDefaultConfig(), {
               onIceCandidate: (candidate: RTCIceCandidateInit) => {
                 socket.emit(SOCKET_EVENTS.SIGNAL_ICE, {
                   roomId: payload.roomId,
@@ -105,30 +139,45 @@ export class OpenMesh {
               },
             });
 
-            this.peers.set(from, pc);
+            if (!existing) {
+              this.peers.set(from, pc);
+            }
 
-            const answer = await pc.handleOfferAndCreateAnswer(payload.signal as unknown as RTCSessionDescriptionInit);
-
-            socket.emit(SOCKET_EVENTS.SIGNAL_ANSWER, {
-              roomId: payload.roomId,
-              fromDeviceId: this.deviceId,
-              toDeviceId: from,
-              signal: answer,
-            });
+            try {
+              const answer = await pc.handleOfferAndCreateAnswer(payload.signal as unknown as RTCSessionDescriptionInit);
+              socket.emit(SOCKET_EVENTS.SIGNAL_ANSWER, {
+                roomId: payload.roomId,
+                fromDeviceId: this.deviceId,
+                toDeviceId: from,
+                signal: answer,
+              });
+            } catch (err) {
+              console.warn(`[OpenMesh] Failed to handle offer from ${from}:`, err);
+            }
           });
 
           socket.on(SOCKET_EVENTS.SIGNAL_ANSWER, async (payload: WebRTCSignalPayload) => {
             const from = payload.fromDeviceId;
             const pc = this.peers.get(from);
             if (!pc) return;
-            await pc.handleAnswer(payload.signal as unknown as RTCSessionDescriptionInit);
+            try {
+              await pc.handleAnswer(payload.signal as unknown as RTCSessionDescriptionInit);
+            } catch (err) {
+              // handleAnswer no longer throws, but catch defensively
+              console.warn(`[OpenMesh] Failed to handle answer from ${from}:`, err);
+            }
           });
 
           socket.on(SOCKET_EVENTS.SIGNAL_ICE, async (payload: WebRTCSignalPayload) => {
             const from = payload.fromDeviceId;
             const pc = this.peers.get(from);
             if (!pc) return;
-            await pc.addIceCandidate(payload.signal as unknown as RTCIceCandidateInit);
+            try {
+              await pc.addIceCandidate(payload.signal as unknown as RTCIceCandidateInit);
+            } catch (err) {
+              // ICE candidate failures are non-fatal
+              console.warn(`[OpenMesh] Failed to add ICE candidate from ${from}:`, err);
+            }
           });
 
           resolve();
@@ -218,7 +267,11 @@ export class OpenMesh {
 
     this.peers.set(toDeviceId, pc);
 
-    const offer = await pc.createOffer();
+    // tryCreateOffer returns null when a remote offer was already accepted
+    // during the async yield (glare).  In that case we skip sending our own
+    // offer — the connection is being established through the remote offer.
+    const offer = await pc.tryCreateOffer();
+    if (!offer) return;
 
     this.socket.emit(SOCKET_EVENTS.SIGNAL_OFFER, {
       roomId,
@@ -234,18 +287,32 @@ export class OpenMesh {
 
     await this.startPeerConnection(toDeviceId, options.roomId ?? "");
 
-    const dc = this.dataChannels.get(toDeviceId);
-    if (!dc || dc.readyState !== "open") {
+    // IMPORTANT: Hold a stable reference to the data channel.
+    // DO NOT re-fetch from this.dataChannels — the map entry can be
+    // overwritten by wireDataChannel (via ondatachannel) during the
+    // async wait, returning a different channel object that may not
+    // be open yet.
+    let channel = this.dataChannels.get(toDeviceId);
+    if (!channel || channel.readyState !== "open") {
       await this.waitForDataChannel(toDeviceId);
+      channel = this.dataChannels.get(toDeviceId);
     }
-
-    const channel = this.dataChannels.get(toDeviceId);
     if (!channel) throw new Error("DataChannel not ready");
+
+    // Defensive: if the channel was replaced during the wait and the
+    // replacement isn't open yet, wait for it directly.
+    if (channel.readyState !== "open") {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("DataChannel not open after wait")), 5000);
+        channel!.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+    }
 
     const handle = await this.transferManager.sendFile(channel, file, {
       chunkSize: options.chunkSize ?? this._settings.chunkSize,
       enableEncryption: options.enableEncryption ?? this._settings.enableEncryption,
       peerId: toDeviceId,
+      recipientPublicKeyB64: options.recipientPublicKeyB64,
     });
 
     this.fileCache.set(handle.transferId, file);
@@ -279,21 +346,57 @@ export class OpenMesh {
   }
 
   private waitForDataChannel(peerId: string, timeoutMs = 10000): Promise<void> {
+    const configuredTimeout = Number(process.env.OPENMESH_DATACHANNEL_TIMEOUT_MS ?? timeoutMs);
+
     return new Promise((resolve, reject) => {
+      let finished = false;
       const start = Date.now();
-      const check = () => {
+
+      const done = (err?: Error) => {
+        if (finished) return;
+        finished = true;
         const dc = this.dataChannels.get(peerId);
-        if (dc?.readyState === "open") {
-          resolve();
-          return;
-        }
-        if (Date.now() - start > timeoutMs) {
-          reject(new Error("DataChannel connection timeout"));
-          return;
-        }
-        setTimeout(check, 100);
+        try { if (dc) dc.onopen = null as any; } catch (_) {}
+        try { if (dc) dc.onerror = null as any; } catch (_) {}
+        try { if (dc) dc.onclose = null as any; } catch (_) {}
+        if (err) reject(err); else resolve();
       };
-      check();
+
+      let trackedDc: RTCDataChannel | null = null;
+      const wireEvents = () => {
+        const dc = this.dataChannels.get(peerId);
+        if (!dc) return;
+        if (dc === trackedDc) return;
+        if (dc.readyState === "open") { done(); return; }
+
+        trackedDc = dc;
+        dc.onopen = () => done() as any;
+        dc.onerror = (() => {
+          if (this.dataChannels.get(peerId) !== dc) return;
+          done(new Error("DataChannel error while waiting for open"));
+        }) as any;
+        dc.onclose = (() => {
+          if (this.dataChannels.get(peerId) !== dc) return;
+          done(new Error(`DataChannel closed while waiting for open (state: ${dc.readyState})`));
+        }) as any;
+      };
+
+      const poll = () => {
+        if (finished) return;
+        wireEvents();
+
+        if (Date.now() - start > configuredTimeout) {
+          const state = this.dataChannels.get(peerId)?.readyState ?? "none";
+          console.debug(`[OpenMesh] DataChannel timeout for ${peerId}, state=${state}`);
+          done(new Error("DataChannel connection timeout"));
+          return;
+        }
+
+        setTimeout(poll, 100);
+      };
+
+      wireEvents();
+      if (!finished) poll();
     });
   }
 

@@ -43,5 +43,6 @@ export async function hash(data: ArrayBuffer): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
-
 export { Sha256Hasher } from "./sha256.js";
+export { default as KeyWrap } from "./keywrap.js";
+export { generateKeyPair, exportPublicKey, importPublicKey, deriveSharedKey, wrapKeyWithPublicKey, unwrapKeyWithPrivateKey } from "./keywrap.js";
