@@ -356,9 +356,9 @@ export class OpenMesh {
         if (finished) return;
         finished = true;
         const dc = this.dataChannels.get(peerId);
-        try { if (dc) dc.onopen = null as any; } catch (_) {}
-        try { if (dc) dc.onerror = null as any; } catch (_) {}
-        try { if (dc) dc.onclose = null as any; } catch (_) {}
+        try { if (dc) dc.onopen = null as any; } catch { }
+        try { if (dc) dc.onerror = null as any; } catch { }
+        try { if (dc) dc.onclose = null as any; } catch { }
         if (err) reject(err); else resolve();
       };
 
