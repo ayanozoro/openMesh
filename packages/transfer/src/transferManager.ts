@@ -1,7 +1,7 @@
 import { DEFAULT_SETTINGS } from "@openmesh/shared";
 import { ChunkManager } from "./chunkManager.js";
 import { TransferOptions, TransferManifest, TransferMessageType } from "./protocol.js";
-import { generateKey, exportKey, importKey, encrypt, decrypt, Sha256Hasher } from "@openmesh/encryption";
+import { generateKey, exportKey, importKey, encrypt, decrypt, Sha256Hasher, wrapKeyWithPublicKey } from "@openmesh/encryption";
 import { TransferStateStore, getMissingIndexes } from "./stateStore.js";
 import { buildResumeRequest, shouldRequestResume } from "./resume.js";
 
@@ -97,6 +97,33 @@ export class TransferManager extends EventTarget {
     return this.handles.get(transferId);
   }
 
+  private waitForChannelOpen(channel: RTCDataChannel, timeoutMs = 30000): Promise<void> {
+    if (channel.readyState === "open") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        const err = new Error(`DataChannel did not open within ${timeoutMs}ms (state: ${channel.readyState})`);
+        this.dispatchEvent(new CustomEvent('channel-timeout', { detail: { error: err } }));
+        reject(err);
+      }, timeoutMs);
+
+      const onOpen = () => { cleanup(); resolve(); };
+      const onClose = () => { cleanup(); const err = new Error(`DataChannel closed before opening (state: ${channel.readyState})`); this.dispatchEvent(new CustomEvent('channel-timeout', { detail: { error: err } })); reject(err); };
+      const onError = () => { cleanup(); const err = new Error("DataChannel error while waiting for open"); this.dispatchEvent(new CustomEvent('channel-timeout', { detail: { error: err } })); reject(err); };
+
+      channel.addEventListener("open", onOpen);
+      channel.addEventListener("close", onClose);
+      channel.addEventListener("error", onError);
+
+      function cleanup() {
+        clearTimeout(timer);
+        channel.removeEventListener("open", onOpen);
+        channel.removeEventListener("close", onClose);
+        channel.removeEventListener("error", onError);
+      }
+    });
+  }
+
   private waitForAckOrDrain(transferId: string, channel: RTCDataChannel): Promise<void> {
     return new Promise((resolve) => {
       const target = this.pendingWaiters.get(transferId) ?? new EventTarget();
@@ -120,10 +147,50 @@ export class TransferManager extends EventTarget {
   }
 
   async sendFile(channel: RTCDataChannel, file: File, opts: TransferOptions = {}): Promise<TransferHandle> {
-    const chunkSize = opts.chunkSize ?? DEFAULT_SETTINGS.chunkSize;
+    // Wait for the data channel to be open before sending anything
+    try {
+      await this.waitForChannelOpen(channel);
+    } catch (e) {
+      // Emit a transfer-error event for the caller UI
+      this.dispatchEvent(new CustomEvent('transfer-error', { detail: { error: e, code: 'CHANNEL_TIMEOUT' } }));
+      throw e;
+    }
+
+    const requestedChunkSize = opts.chunkSize ?? DEFAULT_SETTINGS.chunkSize;
     const ackTimeout = opts.ackTimeout ?? 5000;
     const retryLimit = opts.retryLimit ?? 5;
-    const enableEncryption = opts.enableEncryption ?? true;
+    let enableEncryption = opts.enableEncryption ?? true;
+    // Respect underlying DataChannel maxMessageSize to avoid
+    // "Trying to send message larger than max-message-size" errors in browsers.
+    // Chrome exposes 256 KB, Firefox returns null (actual limit 64 KB), Safari ~256 KB.
+    // Always cap chunkSize strictly below maxMessageSize to leave headroom for
+    // AES-GCM encryption overhead (28 bytes) and JSON framing.
+    let chunkSize = requestedChunkSize;
+    let maxMsgSize = 0;
+    try {
+      const val = (channel as unknown as { maxMessageSize?: unknown }).maxMessageSize;
+      if (typeof val === "number" && val > 0) {
+        maxMsgSize = val;
+      } else if (val == null) {
+        // Firefox returns null; use 64 KB as safe default
+        maxMsgSize = 64 * 1024;
+      }
+    } catch (_) {
+      // property access failed
+    }
+    if (maxMsgSize <= 0) {
+      maxMsgSize = 64 * 1024;
+    }
+    // Always cap unconditionally with generous safety margin.
+    // Some browsers (Firefox, older Safari) have effective limits lower
+    // than the reported maxMessageSize; a 16 KB margin guarantees safety.
+    const SAFETY_MARGIN = 16 * 1024;
+    const effectiveMaxSend = Math.max(16384, maxMsgSize - SAFETY_MARGIN);
+    if (chunkSize > effectiveMaxSend) {
+      chunkSize = effectiveMaxSend;
+      console.warn(`[TransferManager] Capped chunkSize from ${requestedChunkSize} to ${chunkSize} (maxMessageSize=${maxMsgSize}, margin=16KB)`);
+    }
+
     const chunkManager = new ChunkManager({ chunkSize });
     const totalChunks = chunkManager.getTotalChunks(file.size);
     const transferId = opts.existingTransferId ?? `t_${generateId()}`;
@@ -140,13 +207,36 @@ export class TransferManager extends EventTarget {
     let key: CryptoKey | null = null;
     let encryptionKeyB64: string | undefined;
 
+    const hasWebCrypto = typeof globalThis.crypto !== "undefined" && typeof (globalThis.crypto as { subtle?: unknown }).subtle !== "undefined";
     if (enableEncryption) {
-      key = await generateKey();
-      const rawKey = await exportKey(key);
-      encryptionKeyB64 = ab2b64(rawKey);
-      (manifest as TransferManifest & { key?: string }).key = encryptionKeyB64;
+      if (!hasWebCrypto) {
+        console.warn("[TransferManager] Web Crypto API unavailable (insecure context). Falling back to unencrypted transfer.");
+        enableEncryption = false;
+        opts.enableEncryption = false;
+      } else {
+        key = await generateKey();
+        const rawKey = await exportKey(key);
+        const rawKeyB64 = ab2b64(rawKey);
+        if (opts.recipientPublicKeyB64) {
+          try {
+            const recipientPub = b642ab(opts.recipientPublicKeyB64);
+            const wrapped = await wrapKeyWithPublicKey(rawKey, recipientPub);
+            encryptionKeyB64 = wrapped;
+          } catch (_) {
+            encryptionKeyB64 = rawKeyB64;
+          }
+        } else {
+          encryptionKeyB64 = rawKeyB64;
+        }
+        (manifest as TransferManifest & { key?: string }).key = encryptionKeyB64;
+      }
     }
 
+    if (channel.readyState !== "open") {
+      const err = new Error(`Cannot send META: DataChannel state is "${channel.readyState}"`);
+      this.dispatchEvent(new CustomEvent('transfer-error', { detail: { error: err, code: 'CHANNEL_NOT_OPEN' } }));
+      throw err;
+    }
     const meta = { t: TransferMessageType.META, p: manifest };
     channel.send(JSON.stringify(meta));
 
@@ -314,8 +404,32 @@ export class TransferManager extends EventTarget {
       t: TransferMessageType.CHUNK,
       p: { transferId, index, length: payload.byteLength },
     });
-    channel.send(header);
-    channel.send(payload);
+
+    const chMaxSize = (ctx.channel as unknown as { maxMessageSize?: number }).maxMessageSize;
+    const limit = typeof chMaxSize === "number" && chMaxSize > 0 ? chMaxSize : 64 * 1024;
+    if (payload.byteLength > limit) {
+      throw new Error(
+        `Chunk ${index} payload (${payload.byteLength}B) exceeds DataChannel maxMessageSize (${limit}). ` +
+        `Reduce chunkSize to avoid "Trying to send message larger than max-message-size".`
+      );
+    }
+
+    try {
+      channel.send(header);
+      channel.send(payload);
+    } catch (err: unknown) {
+      // Even with capping, the browser's actual limit may be lower than
+      // the reported maxMessageSize.  Throw a clear error so the caller
+      // can report it to the user.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("max-message-size") || msg.includes("larger than")) {
+        throw new Error(
+          `Failed to send chunk ${index} (${payload.byteLength}B). ` +
+          `Browser rejected the message — try a smaller chunkSize setting.`
+        );
+      }
+      throw err;
+    }
 
     ctx.sentIndexes.add(index);
 
@@ -384,7 +498,7 @@ export class TransferManager extends EventTarget {
     const states = await this.stateStore.listActiveReceiverStates();
     for (const state of states.filter((s) => s.fromPeerId === peerId)) {
       const req = buildResumeRequest(state.transferId, state.manifest, new Set(state.receivedIndexes));
-      if (req.missingIndexes.length > 0) {
+      if (req.missingIndexes.length > 0 && channel.readyState === "open") {
         channel.send(JSON.stringify({ t: TransferMessageType.RESUME, p: req }));
       }
     }
@@ -450,6 +564,15 @@ export class TransferManager extends EventTarget {
     });
 
     if (base64Key) {
+      const hasWebCrypto = typeof globalThis.crypto !== "undefined" && typeof (globalThis.crypto as { subtle?: unknown }).subtle !== "undefined";
+      if (!hasWebCrypto) {
+        this.dispatchEvent(new CustomEvent("transfer-error", {
+          detail: { from: fromDeviceId, transferId, error: "Web Crypto API unavailable (insecure context). Cannot decrypt." },
+        }));
+        this.cleanupTransfer(transferId);
+        void this.stateStore.removeReceiverState(transferId);
+        return;
+      }
       importKey(b642ab(base64Key)).then((k) => {
         const r = this.receptions.get(transferId);
         if (r) r.cryptoKey = k;

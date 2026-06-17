@@ -31,7 +31,7 @@ export function createSocketServer(httpServer: HttpServer): Server {
 
   // Log HTTP upgrade attempts to diagnose websocket handshake issues
   try {
-    httpServer.on("upgrade", (req, socket, head) => {
+    httpServer.on("upgrade", (req) => {
       try {
         console.log(`[upgrade] HTTP upgrade requested: ${req.url} from ${req.socket.remoteAddress}`);
       } catch (err) {

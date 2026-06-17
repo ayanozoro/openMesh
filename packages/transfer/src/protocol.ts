@@ -68,6 +68,8 @@ export interface TransferOptions {
   maxBufferedAmount?: number; // bytes threshold for adaptive windowing
   peerId?: string;
   enableEncryption?: boolean;
+  // Optional base64-encoded recipient public key to wrap per-transfer symmetric key.
+  recipientPublicKeyB64?: string;
   resumeFromIndex?: number;
   existingTransferId?: string;
   restoredAckedIndexes?: number[];

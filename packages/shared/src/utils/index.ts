@@ -1,8 +1,14 @@
 export function generateId(prefix = ""): string {
-  const random =
-    typeof globalThis.crypto !== "undefined"
-      ? globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 12)
-      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  let random: string;
+  if (typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function") {
+    random = globalThis.crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  } else if (typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.getRandomValues === "function") {
+    const arr = new Uint8Array(6);
+    globalThis.crypto.getRandomValues(arr);
+    random = Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+  } else {
+    random = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
   return prefix ? `${prefix}_${random}` : random;
 }
 

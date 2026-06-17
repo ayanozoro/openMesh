@@ -5,7 +5,6 @@ import { useAppStore } from "@/stores/app-store";
 
 let client: any = null;
 let clientReadyResolve: ((c: any) => void) | null = null;
-let clientReadyPromise: Promise<any> | null = null;
 
 export function useOpenMesh(): any {
   const sdkRef = useRef<any>(null);

@@ -5,10 +5,9 @@
   "description": "Privacy-first, peer-to-peer local file sharing platform",
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0 <=22.x",
-    "pnpm": ">=9.0.0 <10.0.0"
+    "node": ">=20.0.0 <=22.x"
   },
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "npm@10.9.8",
   "workspaces": [
     "apps/*",
     "packages/*"

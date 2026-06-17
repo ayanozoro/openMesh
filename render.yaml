@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: openmesh-server
+    env: node
+    plan: starter
+    branch: main
+    buildCommand: bash ./scripts/render-build.sh
+    startCommand: npm run start --workspace=@openmesh/server
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        value: ""
+      - key: CORS_ORIGIN
+        value: ""
+    healthCheckPath: /api/health
