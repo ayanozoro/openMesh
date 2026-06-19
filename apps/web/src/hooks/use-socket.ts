@@ -27,6 +27,7 @@ export function useSocketConnection(): RefObject<Socket | null> {
 
     let socket: Socket;
     try {
+      console.debug("[OpenMesh] Connecting to signaling server:", settings.serverUrl);
       socket = io(settings.serverUrl, {
         transports: ["websocket", "polling"],
         reconnection: true,
