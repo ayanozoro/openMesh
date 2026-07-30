@@ -91,18 +91,6 @@ await client.sendFile(file);
 client.sendText("Hello!");
 ```
 
-## Development Roadmap
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 1 | ✅ Done | Monorepo, UI, Signaling |
-| 2 | 🔜 Next | Device Discovery, Rooms |
-| 3 | Planned | WebRTC, Text Transfer |
-| 4 | Planned | File Transfer Engine |
-| 5 | ✅ Done | Chunking, Resume |
-| 6 | Planned | Encryption, SDK |
-| 7 | Planned | Docs, Tests, Release |
-
 ## Documentation
 
 - [Architecture](docs/architecture.md)
