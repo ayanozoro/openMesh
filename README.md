@@ -38,11 +38,11 @@ pnpm setup
 
 ```bash
 # Start both web and server
-pnpm dev
+npm dev
 
 # Or individually
-pnpm dev:web      # http://localhost:3000
-pnpm dev:server   # http://localhost:4000
+npm dev:web      # http://localhost:3000
+npm dev:server   # http://localhost:4000
 ```
 
 ## Project Structure
