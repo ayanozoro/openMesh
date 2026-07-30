@@ -30,8 +30,7 @@ Share files, folders, and text across devices on your local network — no cloud
 ```bash
 git clone https://github.com/openmesh/openmesh.git
 cd openmesh
-pnpm install
-pnpm setup
+npm run build
 ```
 
 ### Development
