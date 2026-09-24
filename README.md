@@ -18,10 +18,10 @@ Share files, folders, and text across devices on your local network — no cloud
 
 ## Quick Start
 How to use Website 
-step-1 : after opening the website wait for 10-15 sec to get connected.
-step 2 : go to setting and change the device name if you want.
-step 3 : go to the transfer page and click on the device you want to share the data with if you don't choose any device the file will share to all the connected device. 
-There is also an option of chat room where you can chat with other 
+- **step 1** : after opening the website wait for 10-15 sec to get connected.
+- **step 2** : go to setting and change the device name if you want.
+- **step 3** : go to the transfer page and click on the device you want to share the data with if you don't choose any device the file will share to all the connected device. 
+- There is also an option of chat room where you can chat with other 
 ### Prerequisites
 
 - Node.js 20+
