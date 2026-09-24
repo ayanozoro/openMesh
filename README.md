@@ -4,7 +4,6 @@
 
 Share files, folders, and text across devices on your local network — no cloud storage, no accounts, no limits.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 
@@ -16,14 +15,16 @@ Share files, folders, and text across devices on your local network — no cloud
 - **Large File Support** — Stream-based transfers for 100GB+ files
 - **Cross-Platform** — Web, with desktop and mobile planned
 - **Modern UI** — Glassmorphism-inspired dark mode interface
-- **Open Source** — MIT licensed, self-hostable
 
 ## Quick Start
-
+How to use Website 
+step-1 : after opening the website wait for 10-15 sec to get connected.
+step 2 : go to setting and change the device name if you want.
+step 3 : go to the transfer page and click on the device you want to share the data with if you don't choose any device the file will share to all the connected device. 
+There is also an option of chat room where you can chat with other 
 ### Prerequisites
 
 - Node.js 20+
-- pnpm 9+
 
 ### Installation
 
